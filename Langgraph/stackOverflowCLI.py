@@ -4,6 +4,7 @@
 # In[20]:
 
 
+import time
 import requests
 from typing import List, Dict
 from langchain_core.tools import tool
@@ -20,13 +21,13 @@ class AgentState(TypedDict):
     """State for the Stack Overflow search agent."""
     messages: Annotated[list[BaseMessage], operator.add]
 
-def search_stackoverflow(tags: List[str], query: str, max_results: int = 5) -> Dict:
+def search_stackoverflow(tags: List[str],  max_results: int = 5) -> Dict:
     """
     Search Stack Overflow questions using tags and a user query.
 
     Args:
         tags (List[str]): List of tags like ["python", "api"]
-        query (str): The search string or error message
+        
         max_results (int): Number of results to return
 
     Returns:
@@ -39,15 +40,18 @@ def search_stackoverflow(tags: List[str], query: str, max_results: int = 5) -> D
         "site": "stackoverflow",
         "pagesize": max_results,
         "tagged": ";".join(tags),
-        "intitle": query
+        # "intitle": query
     }
 
     try:
         response = requests.get(url, params=params)
         response.raise_for_status()
+        
         data = response.json()
 
+
         items = data.get("items", [])
+        print(items)
         if not items:
             return {"status": "no_results", "message": "No Stack Overflow questions found."}
 
@@ -56,16 +60,17 @@ def search_stackoverflow(tags: List[str], query: str, max_results: int = 5) -> D
                 "title": item.get("title", ""),
                 "link": item.get("link", ""),
                 "score": item.get("score", 0),
+                "question_id": item.get("question_id", 0),
                 "is_answered": item.get("is_answered", False),
                 "tags": item.get("tags", [])
             }
             for item in items
         ]
 
-        return {"status": "success", "questions": questions}
+        return {"questions": questions}
 
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        return {"message": str(e)}
 
 
 # In[21]:
@@ -75,18 +80,18 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 import os
 import google.generativeai as genai
 
-# os.environ["GOOGLE_API_KEY"] = "AIzaSyA4Zn7MaXiJ9bV81NEen9z91O8ePjf5mic"
+os.environ["GOOGLE_API_KEY"] = ""
 genai.configure(api_key=os.environ["GOOGLE_API_KEY"])
 
 model = ChatGoogleGenerativeAI(model="gemini-1.5-pro")
 @tool
-def tag_search_tool(user_query: str,tags : List[str]) -> Dict[str,Any]:
+def tag_search_tool(tags : List[str]) -> Dict[str,Any]:
     """
     Extract relevant error tags from a user's error description using an LLM,
     then find matching Stack Overflow questions.
     
     Args:
-        user_query (str): The user's description of their error or issue
+        user_query (str): Query to be asked in the stack overflow search
         tags(List[str]) : relevant tags for the query
     
     Returns:
@@ -118,20 +123,15 @@ def tag_search_tool(user_query: str,tags : List[str]) -> Dict[str,Any]:
         
         
         stackoverflow_results = search_stackoverflow(
-            tags=tags,
-            query=user_query
+            tags=tags
+            # query=user_query
         )
         
-        print("Params for search_stackoverflow:", params)
-        print("Tags:", tags)
-        print("Query:", user_query)
+        # print("Params for search_stackoverflow:", params)
+        # print("Tags:", tags)
+        # print("Query:", user_query)
 
-        return {
-            "status": "success",
-            "tags": tags,
-            
-            "stackoverflow_results": stackoverflow_results
-        }
+        return stackoverflow_results
         
     except Exception as e:
         return {
@@ -172,14 +172,14 @@ def tag_search_tool(user_query: str,tags : List[str]) -> Dict[str,Any]:
 @tool
 def fetch_stackoverflow_answers(question_id: int, max_answers: int = 3) -> Dict:
     """
-    Fetch answers for a specific Stack Overflow question using its ID.
+    Fetch answers for a specific Stack Overflow question using its question_id.
 
     Args:
         question_id (int): The ID of the Stack Overflow question
         max_answers (int): Maximum number of answers to return
 
     Returns:
-        Dict: Contains answers status and list of answers (if any)
+        Dict: Contains answers status and list of answers 
     """
     url = f"https://api.stackexchange.com/2.3/questions/{question_id}/answers"
     params = {
@@ -212,7 +212,7 @@ def fetch_stackoverflow_answers(question_id: int, max_answers: int = 3) -> Dict:
         ]
         
 
-        return {"status": "success", "answers": answers}
+        return {"answers": answers}
 
     except Exception as e:
         return {"status": "error", "message": str(e)}
@@ -247,6 +247,7 @@ class Agent:
 
     def call_gemini(self, state: AgentState):
         messages = state["messages"]
+        time.sleep(3)
         if self.system:
             messages = [SystemMessage(content=self.system)] + messages
 
@@ -277,7 +278,8 @@ tools = [fetch_stackoverflow_answers,tag_search_tool]
 
 system = """You are a Stack Overflow Search Assistant. Help users find solutions to their 
     programming errors by analyzing their descriptions, extracting relevant tags,
-    and searching Stack Overflow for matching questions and answers."""
+    and searching Stack Overflow for matching questions and find the most relevant answer.Give a detailed exact answer.
+    If you don't know the answer, say 'I don't know'."""
 
 model = ChatGoogleGenerativeAI(model="gemini-1.5-pro")
 
@@ -302,16 +304,15 @@ def interact_with_agent():
             break
         
         # Add user message to history
-        history.append(HumanMessage(content=user_input))
+        # history.append(HumanMessage(content=user_input))
         
         # Run the agent graph with the current history
-        result = stack_overflow.graph.invoke({"messages": history})
+        result = stack_overflow.graph.invoke({"messages": [HumanMessage(content=user_input)]})
         
         # Extract the latest messages from the result and add them to history
-        new_messages = result["messages"]
-        for msg in new_messages:
-            print(f"\nAgent: {msg.content}")
-            history.append(msg)
+        new_messages = result["messages"][-1]
+        print("Agent:", new_messages.content)
+        
         
         
 
@@ -319,11 +320,10 @@ def interact_with_agent():
 # In[27]:
 
 
+# search_stackoverflow(["docker"],"docker run error",5)
 interact_with_agent()
 
-
 # In[ ]:
-
 
 
 
