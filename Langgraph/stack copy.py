@@ -76,7 +76,7 @@ import os
 import google.generativeai as genai
 
 model = ChatGroq(
-    #groq_api_key="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",
+    
     model_name="llama3-8b-8192"  
 )
 
